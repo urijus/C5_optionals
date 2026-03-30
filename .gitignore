@@ -1,0 +1,6 @@
+*.jpg
+*.csv
+*.pkl
+*.wav
+*.pt
+*.DS_Store
