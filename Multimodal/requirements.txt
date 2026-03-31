@@ -1,0 +1,14 @@
+torch
+torchvision
+torchaudio
+torchinfo
+torchview
+graphviz
+numpy
+pandas
+tqdm
+Pillow
+matplotlib
+seaborn
+facenet-pytorch
+scikit-learn
