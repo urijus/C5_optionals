@@ -12,3 +12,5 @@ matplotlib
 seaborn
 facenet-pytorch
 scikit-learn
+scipy
+timm
