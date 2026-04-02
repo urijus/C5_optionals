@@ -1,5 +1,8 @@
 import pandas as pd
 import numpy as np
+from pathlib import Path
+
+from src.config import Config
 
 
 def compute_avg_acc(pred_gt):
@@ -153,10 +156,10 @@ def main(pred_gt,full_annotations):
 
 
 if __name__ == '__main__': 
+    config = Config()
+    ROOT = Path(__file__).resolve().parent.parent
 
-    full_annotations = pd.read_csv(r'test_set_age_labels.csv',sep = ',')
-    pretictions_with_gt = pd.read_csv(r'predictions_test_set.csv',sep = ',')
+    full_annotations = pd.read_csv(str(ROOT / 'evaluation' / 'test_set_age_labels.csv'),sep = ',')
+    pretictions_with_gt = pd.read_csv(str(Path(config.output_dir) / 'predictions_test_set.csv'),sep = ',')
 
     main(pretictions_with_gt,full_annotations)
-
-

@@ -1,7 +1,12 @@
 import argparse
+import torch
+from pathlib import Path
 from src.config import Config
 from src.data.loaders import get_dataloaders
 from src.models.fusion_model import MultiModalModel
+from src.train.engine import fit, load_checkpoint
+from src.train.losses import build_loss
+from src.train.test_utils import evaluate_test, predict_and_export_csv
 
 
 def get_user_args():
@@ -18,9 +23,7 @@ def get_user_args():
     return parser.parse_args()
 
 
-
-
-if __name__=="__main__":
+def main():
     args = get_user_args()
     config = Config()
 
@@ -29,8 +32,43 @@ if __name__=="__main__":
     if args.modalities is not None:
         config.model.modalities = args.modalities
 
-    # Load data
-    train_loader, valid_loader, test_loader, class_counts, class_weights = get_dataloaders(config)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    train_loader, valid_loader, test_loader, class_weights, ethnic_weights = get_dataloaders(config)
+
+    model = MultiModalModel(config).to(device)
 
     # Train
-    model = MultiModalModel(config)
+    history, best_state = fit(
+        config,
+        model,
+        train_loader,
+        valid_loader,
+        class_weights,
+        ethnic_weights,
+        device,
+    )
+
+    # Load best checkpoint
+    checkpoint_path = Path(config.output_dir) / "best_model.pt"
+    load_checkpoint(model, checkpoint_path, device=device)
+
+    # Evaluate on test
+    loss_fn = build_loss(label_smoothing=0.0)
+
+    test_loss, test_acc = evaluate_test(model, test_loader, loss_fn, device)
+    print(f"Test loss: {test_loss:.4f} | Test acc: {test_acc:.4f}")
+
+    # Export csv for bias evaluation script
+    predict_and_export_csv(
+        model=model,
+        data_loader=test_loader,
+        device=device,
+        save_path=Path(config.output_dir) / "predictions_test_set.csv",
+    )
+
+if __name__=="__main__":
+    main()
+   
+
+    

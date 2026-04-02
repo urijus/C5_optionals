@@ -12,7 +12,7 @@ class DataConfig:
     image_size: int = 224
     sample_rate: int = 8000
     n_mels: int = 64
-    max_text_length: int = 128
+    max_text_length: int = 256
     num_workers: int = 4
 
 @dataclass
@@ -23,21 +23,46 @@ class TrainConfig:
     weight_decay: float = 1e-4
     use_weighted_loss: bool = True
     use_weighted_sampler: bool = True
+    alpha: float = 0.5
+    beta: float = 0.1
+    label_smoothing: float = 0.05
     early_stopping_patience: int = 10
+    modality_dropout_prob: float = 0.1
+
+    # Visual encoder
+    visual_encoder_lr: float = 1e-5
+    train_last_n_blocks_visual: int = 2
+    visual_encoder_proj_lr: float = 1e-4
+
+    # Audio encoder
+    audio_encoder_lr = 1e-4
+
+    # Text encoder
+    text_encoder_lr: float = 5e-6
+    text_encoder_proj_lr: float = 1e-4
+    train_last_n_blocks_text: int = 2
+
+    # Final classifier
+    classifier_lr: float = 1e-4
+
+    modality_dropout_prob: float = 0.0
+    
 
 @dataclass
 class ModelConfig:
-    modalities: Optional[List[str]] = None
+    modalities: List[str] = field(default_factory=lambda: ["image", "text", "audio"])
     embedding_dim: int = 256
     num_classes: int = 7
     dropout: float = 0.3
+
     visual_encoder: str = "convnextv2"
+    text_encoder: str = "distilbert-base-uncased"
+    audio_encoder: str = "cnn"
 
 @dataclass
 class Config:
     seed: int = 42
-    device: str = "cuda"
     data: DataConfig = field(default_factory=DataConfig)
     train: TrainConfig = field(default_factory=TrainConfig)
     model: ModelConfig = field(default_factory=ModelConfig)
-    output_dir: str = Path(ROOT/"outputs").mkdir(exist_ok=True)
+    output_dir: str = Path(ROOT/"outputs")

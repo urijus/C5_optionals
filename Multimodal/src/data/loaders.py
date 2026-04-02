@@ -1,8 +1,9 @@
 from torch.utils.data import DataLoader
+from transformers import AutoTokenizer
 
 from src.data.dataset import MultiModalDataset
 from src.data.transforms import build_image_transforms, AudioTransform
-from src.data.collate import multimodal_collate_fn
+from src.data.collate import build_multimodal_collate_fn
 from src.data.sampler import build_weighted_sampler
 
 
@@ -37,14 +38,33 @@ def get_dataloaders(config):
     train_sampler = None
     shuffle_train = True
 
+    # Load collate function
+    tokenizer = None
+    if "text" in config.model.modalities:
+        tokenizer = AutoTokenizer.from_pretrained(config.model.text_encoder)
+
+    collate_fn = build_multimodal_collate_fn(
+        tokenizer=tokenizer,
+        max_text_length=config.data.max_text_length,
+    )
+
     if config.train.use_weighted_sampler:
         train_labels = train_dataset.labels_csv["AgeGroup"].to_list()
-        train_labels = [train_label - 1 for train_label in train_labels]
-        train_sampler, class_counts, class_weights = build_weighted_sampler(train_labels)
+        train_labels = [x - 1 for x in train_labels]
+
+        train_ethnicities = train_dataset.labels_csv["Ethnicity"].to_list()
+        train_ethnicities = [x - 1 for x in train_ethnicities]
+
+        train_sampler, class_weights, ethnic_weights = build_weighted_sampler(
+            train_labels,
+            train_ethnicities,
+            alpha=config.train.alpha,
+            beta=config.train.beta,
+        )
         shuffle_train = False
     else:
-        class_counts = None
         class_weights = None
+        ethnic_weights = None
 
     # Dataloaders
     train_loader = DataLoader(
@@ -53,7 +73,7 @@ def get_dataloaders(config):
         shuffle=shuffle_train,
         sampler=train_sampler,
         num_workers=config.data.num_workers,
-        collate_fn=multimodal_collate_fn,
+        collate_fn=collate_fn,
         pin_memory=True,
     )
 
@@ -62,7 +82,7 @@ def get_dataloaders(config):
         batch_size=config.train.batch_size,
         shuffle=False,
         num_workers=config.data.num_workers,
-        collate_fn=multimodal_collate_fn,
+        collate_fn=collate_fn,
         pin_memory=True,
     )
 
@@ -71,19 +91,18 @@ def get_dataloaders(config):
         batch_size=config.train.batch_size,
         shuffle=False,
         num_workers=config.data.num_workers,
-        collate_fn=multimodal_collate_fn,
+        collate_fn=collate_fn,
         pin_memory=True,
     )
 
-    return train_loader, valid_loader, test_loader, class_counts, class_weights
+    return train_loader, valid_loader, test_loader, class_weights, ethnic_weights
 
 
 if __name__=="__main__":
     from src.config import Config
     config = Config()
-    config.model.modalities = ["image", "audio", "text"]
 
-    train_loader, valid_loader, test_loader, class_counts, class_weights = get_dataloaders(config)
+    train_loader, valid_loader, test_loader, class_weights, ethnic_weights = get_dataloaders(config)
 
     batch = next(iter(train_loader))
 
@@ -102,5 +121,5 @@ if __name__=="__main__":
         print("num texts:", len(batch["text"]))
         print("first text:", batch["text"][0][:120])
 
-    print("class counts:", class_counts)
+    print("ethnic weights:", ethnic_weights)
     print("class weights:", class_weights)

@@ -13,8 +13,7 @@ def build_image_transforms(image_size: int = 224):
         transforms.ColorJitter(
             brightness=0.08,
             contrast=0.08,
-            saturation=0.05,
-            hue=0.02,
+            saturation=0.05
         ),
         transforms.RandomAffine(
             degrees=5,
