@@ -28,31 +28,6 @@ def compute_accuracy(logits, labels):
 def create_param_groups(config, model):
     param_groups = []
 
-    # Visual encoder (if exists)
-    if hasattr(model, "visual_encoder") and model.visual_encoder is not None:
-        if hasattr(model.visual_encoder, "backbone"):
-            param_groups.append({
-                "params": [p for p in model.visual_encoder.backbone.parameters() if p.requires_grad],
-                "lr": config.train.visual_encoder_lr,
-            })
-
-        if hasattr(model.visual_encoder, "proj"):
-            param_groups.append({
-                "params": [p for p in model.visual_encoder.proj.parameters() if p.requires_grad],
-                "lr": config.train.visual_encoder_proj_lr,
-            })
-
-    # Always add classifier
-    param_groups.append({
-        "params": [p for p in model.classifier.parameters() if p.requires_grad],
-        "lr": config.train.classifier_lr,
-    })
-
-    return param_groups
-
-def create_param_groups(config, model):
-    param_groups = []
-
     # Visual encoder
     if hasattr(model, "visual_encoder") and model.visual_encoder is not None:
         if hasattr(model.visual_encoder, "backbone"):
@@ -97,6 +72,15 @@ def create_param_groups(config, model):
                     "params": params,
                     "lr": config.train.text_encoder_proj_lr,
                 })
+
+    # Gated fusion
+    if hasattr(model, "gated_fusion") and model.gated_fusion is not None:
+        params = [p for p in model.gated_fusion.parameters() if p.requires_grad]
+        if len(params) > 0:
+            param_groups.append({
+                "params": params,
+                "lr": config.train.gate_lr,
+            })
 
     # Classifier
     params = [p for p in model.classifier.parameters() if p.requires_grad]
@@ -213,7 +197,7 @@ def fit(config, model, train_loader, val_loader, class_weights, ethnic_weights, 
 
     loss_fn = build_loss(label_smoothing=config.train.label_smoothing)
 
-    best_val_loss = float("inf")
+    best_val_acc = -float("inf")
     best_state = None
     patience_counter = 0
 
@@ -256,13 +240,13 @@ def fit(config, model, train_loader, val_loader, class_weights, ethnic_weights, 
             f"val_loss={val_loss:.4f} | val_acc={val_acc:.4f}"
         )
 
-        if val_loss < best_val_loss:
-            best_val_loss = val_loss
+        if val_acc > best_val_acc:
+            best_val_acc = val_acc
             best_state = {
                 "model_state_dict": model.state_dict(),
                 "optimizer_state_dict": optimizer.state_dict(),
                 "epoch": epoch,
-                "val_loss": val_loss,
+                "val_acc": val_acc,
             }
 
             save_checkpoint(best_state, config.output_dir / "best_model.pt")
