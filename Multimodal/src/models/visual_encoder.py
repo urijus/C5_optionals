@@ -1,16 +1,17 @@
 import timm
 import torch.nn as nn
+from facenet_pytorch import InceptionResnetV1
 
 def build_backbone(encoder):
     backbone_map = {
         'rny002': 'regnety_002',
         'vit_base': 'vit_base_patch16_224',
         'eva02': 'eva02_small_patch14_224.mim_in22k',
-        'convnextv2': 'convnextv2_tiny.fcmae_ft_in22k_in1k',
+        'convnextv2': 'convnextv2_tiny.fcmae_ft_in22k_in1k'
     }
 
     if encoder not in backbone_map:
-        raise NotImplementedError(f"Unsupported visual encoder: {encoder}")
+        return None, None, None
     
     model_name = backbone_map[encoder]
     features = timm.create_model(
@@ -87,10 +88,27 @@ def set_trainable_backbone(backbone, train_last_n_blocks):
 
 class VisualEncoder(nn.Module):
 
-    def __init__(self, visual_model: str, embedding_dim: int, train_last_n_blocks: int = -1):
+    def __init__(
+            self, 
+            visual_model: str, 
+            embedding_dim: int, 
+            train_last_n_blocks: int = -1,
+            device:str = "cuda"):
+        
         super().__init__()
         self.backbone, self.feat_dim, self.data_config = build_backbone(visual_model)
-        set_trainable_backbone(self.backbone, train_last_n_blocks=train_last_n_blocks)
+        if self.backbone is None:
+            if visual_model == "inception":
+                self.backbone = InceptionResnetV1(
+                        classify=False,
+                        pretrained='vggface2'
+                    ).to(device)
+                self.feat_dim = 512
+                self.data_config = None
+            else:
+                raise NotImplementedError(f"Unsupported visual encoder: {visual_model}")
+        else:
+            set_trainable_backbone(self.backbone, train_last_n_blocks=train_last_n_blocks)
         self.proj = nn.Linear(self.feat_dim, embedding_dim)
 
     def forward(self, x):
