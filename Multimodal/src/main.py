@@ -7,6 +7,7 @@ from src.models.fusion_model import MultiModalModel
 from src.train.engine import fit, load_checkpoint
 from src.train.losses import build_loss
 from src.train.test_utils import evaluate_test, predict_and_export_csv
+from utils import inspect_average_gates
 
 
 def get_user_args():
@@ -36,7 +37,7 @@ def main():
 
     train_loader, valid_loader, test_loader, class_weights, ethnic_weights = get_dataloaders(config)
 
-    model = MultiModalModel(config).to(device)
+    model = MultiModalModel(config, device).to(device)
 
     # Train
     history, best_state = fit(
@@ -52,6 +53,13 @@ def main():
     # Load best checkpoint
     checkpoint_path = Path(config.output_dir) / "best_model.pt"
     load_checkpoint(model, checkpoint_path, device=device)
+
+    if config.model.gated:
+        avg_gates = inspect_average_gates(model, valid_loader, device)
+
+        print("\nAverage modality gates:")
+        for modality, value in avg_gates.items():
+            print(f"{modality}: {value:.4f}")
 
     # Evaluate on test
     loss_fn = build_loss(label_smoothing=0.0)

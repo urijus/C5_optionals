@@ -1,19 +1,57 @@
 import random
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from src.models.visual_encoder import VisualEncoder
 from src.models.audio_encoder import AudioEncoder
 from src.models.text_encoder import TextEncoder
 
 
+class CrossModalGatedFusion(nn.Module):
+    def __init__(self, embedding_dim: int, modalities: list[str]):
+        super().__init__()
+        self.modalities = modalities
+        self.embedding_dim = embedding_dim
+        self.num_modalities = len(modalities)
+
+        total_dim = embedding_dim * self.num_modalities
+
+        self.gates = nn.ModuleDict({
+            modality: nn.Sequential(
+                nn.Linear(total_dim, embedding_dim),
+                nn.Sigmoid(),
+            )
+            for modality in modalities
+        })
+
+    def forward(self, feat_dict, return_gates=False):
+        feats = [feat_dict[m] for m in self.modalities]
+        concat_feats = torch.cat(feats, dim=1)   # [B, M*D]
+
+        gated_feats = []
+        gate_dict = {}
+
+        for modality in self.modalities:
+            gate = self.gates[modality](concat_feats)   # [B, D]
+            gate_dict[modality] = gate
+            gated_feats.append(feat_dict[modality] * gate)
+
+        fused = torch.cat(gated_feats, dim=1)
+
+        if return_gates:
+            return fused, gate_dict
+        return fused
  
 class MultiModalModel(nn.Module):
-    def __init__(self, config):
+    def __init__(self, config, device):
             super().__init__()
             self.modalities = config.model.modalities
             self.embedding_dim = config.model.embedding_dim
             self.num_classes = config.model.num_classes
             self.modality_dropout_prob = config.train.modality_dropout_prob
+            self.classifier_dropout = config.model.dropout
+            self.device = device
+            self.gated = config.model.gated
 
             if "image" in self.modalities:
                 visual_model = config.model.visual_encoder
@@ -21,7 +59,9 @@ class MultiModalModel(nn.Module):
                 self.visual_encoder = VisualEncoder(
                     visual_model, 
                     self.embedding_dim,
-                    train_last_n_blocks)
+                    train_last_n_blocks,
+                    self.device
+                    )
             if "audio" in self.modalities:
                 self.audio_encoder = AudioEncoder(self.embedding_dim)
             if "text" in self.modalities:
@@ -31,28 +71,47 @@ class MultiModalModel(nn.Module):
                     self.embedding_dim, 
                     text_model, 
                     train_last_n_blocks)
+                
+            self.gated_fusion = CrossModalGatedFusion(
+                embedding_dim=self.embedding_dim,
+                modalities=self.modalities,
+            ) if config.model.gated else None
 
             fusion_in_dim = self.embedding_dim * len(self.modalities)
             self.classifier = nn.Sequential(
-                nn.Linear(fusion_in_dim, 256),
+                nn.Linear(fusion_in_dim, 128),
                 nn.ReLU(),
-                nn.Dropout(0.3),
-                nn.Linear(256, self.num_classes),
+                nn.Dropout(self.classifier_dropout),
+                nn.Linear(128, self.num_classes),
             )
 
-    def forward(self, batch):
-        feats = []
+    def forward(self, batch, return_gates=False):
+        feat_dict = {}
 
         if "image" in self.modalities:
-            feats.append(self.visual_encoder(batch["image"]))
-        if "audio" in self.modalities:
-            feats.append(self.audio_encoder(batch["audio"]))
-        if "text" in self.modalities:
-            feats.append(
-                self.text_encoder(batch["input_ids"], batch["attention_mask"]))
+            feat_dict["image"] = F.normalize(self.visual_encoder(batch["image"]), dim=1)
 
+        if "audio" in self.modalities:
+            feat_dict["audio"] = F.normalize(self.audio_encoder(batch["audio"]), dim=1)
+
+        if "text" in self.modalities:
+            feat_dict["text"] = F.normalize(self.text_encoder(batch["input_ids"], batch["attention_mask"]), dim=1)
+
+        feats = [feat_dict[m] for m in self.modalities]
         feats = self.apply_modality_dropout(feats)
-        fused = torch.cat(feats, dim=1) # could we use transformer rather than just concat?
+
+        for m, feat in zip(self.modalities, feats):
+            feat_dict[m] = feat
+
+        if self.gated:
+            if return_gates:
+                fused, gate_dict = self.gated_fusion(feat_dict, return_gates=True)
+                logits = self.classifier(fused)
+                return logits, gate_dict
+            fused = self.gated_fusion(feat_dict)
+        else:
+            fused = torch.cat(feats, dim=1)
+
         logits = self.classifier(fused)
         return logits
     
@@ -72,10 +131,3 @@ class MultiModalModel(nn.Module):
         for feat, keep in zip(feats, keep_mask):
             out.append(feat if keep else torch.zeros_like(feat))
         return out
-
-
-
-        # WHAT TO DO: 
-        # 1) SAVE BY FAIRNESS
-        # 2) ADD REGULARIZATION (HEAVY OVERFITTING)
-        # 3) ADD MODALITY DROPUT (AUDIO DOESN NTO PLAUY A BIG ROLE NOW...)
