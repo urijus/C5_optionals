@@ -3,4 +3,5 @@
 *.pkl
 *.wav
 *.pt
+*.pyc
 *.DS_Store

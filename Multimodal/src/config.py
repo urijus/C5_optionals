@@ -26,7 +26,7 @@ class TrainConfig:
     alpha: float = 0.5
     beta: float = 0.1
     label_smoothing: float = 0.05
-    early_stopping_patience: int = 10
+    early_stopping_patience: int = 6
     modality_dropout_prob: float = 0.1
 
     # Visual encoder
@@ -42,6 +42,9 @@ class TrainConfig:
     text_encoder_proj_lr: float = 1e-4
     train_last_n_blocks_text: int = 2
 
+    # Gating
+    gate_lr: float = 1e-4
+
     # Final classifier
     classifier_lr: float = 1e-4
 
@@ -53,9 +56,10 @@ class ModelConfig:
     modalities: List[str] = field(default_factory=lambda: ["image", "text", "audio"])
     embedding_dim: int = 256
     num_classes: int = 7
-    dropout: float = 0.3
+    dropout: float = 0.4
 
-    visual_encoder: str = "convnextv2"
+    gated: bool = False
+    visual_encoder: str = "inception"
     text_encoder: str = "distilbert-base-uncased"
     audio_encoder: str = "cnn"
 
