@@ -49,7 +49,9 @@ class MultiModalModel(nn.Module):
             self.embedding_dim = config.model.embedding_dim
             self.num_classes = config.model.num_classes
             self.modality_dropout_prob = config.train.modality_dropout_prob
-            self.classifier_dropout = config.model.dropout
+            self.classifier_dropout = config.model.classifier_dropout
+            self.audio_dropout = config.model.audio_dropout
+            self.text_dropout = config.model.text_dropout
             self.device = device
             self.gated = config.model.gated
 
@@ -63,11 +65,14 @@ class MultiModalModel(nn.Module):
                     self.device
                     )
             if "audio" in self.modalities:
-                self.audio_encoder = AudioEncoder(self.embedding_dim)
+                self.audio_encoder = AudioEncoder(
+                    self.audio_dropout,
+                    self.embedding_dim)
             if "text" in self.modalities:
                 text_model = config.model.text_encoder
                 train_last_n_blocks = config.train.train_last_n_blocks_text
                 self.text_encoder = TextEncoder(
+                    self.text_dropout,
                     self.embedding_dim, 
                     text_model, 
                     train_last_n_blocks)
@@ -85,34 +90,42 @@ class MultiModalModel(nn.Module):
                 nn.Linear(128, self.num_classes),
             )
 
-    def forward(self, batch, return_gates=False):
-        feat_dict = {}
+    def forward(self, batch, return_gates=False, return_features=False):
+        raw_feat_dict = {}
 
         if "image" in self.modalities:
-            feat_dict["image"] = F.normalize(self.visual_encoder(batch["image"]), dim=1)
+            raw_feat_dict["image"] = F.normalize(self.visual_encoder(batch["image"]), dim=1)
 
         if "audio" in self.modalities:
-            feat_dict["audio"] = F.normalize(self.audio_encoder(batch["audio"]), dim=1)
+            raw_feat_dict["audio"] = F.normalize(self.audio_encoder(batch["audio"]), dim=1)
 
         if "text" in self.modalities:
-            feat_dict["text"] = F.normalize(self.text_encoder(batch["input_ids"], batch["attention_mask"]), dim=1)
+            raw_feat_dict["text"] = F.normalize(
+                self.text_encoder(batch["input_ids"], batch["attention_mask"]), dim=1
+            )
 
-        feats = [feat_dict[m] for m in self.modalities]
-        feats = self.apply_modality_dropout(feats)
+        feats = [raw_feat_dict[m] for m in self.modalities]
+        dropped_feats = self.apply_modality_dropout(feats)
 
-        for m, feat in zip(self.modalities, feats):
-            feat_dict[m] = feat
+        feat_dict = {m: feat for m, feat in zip(self.modalities, dropped_feats)}
 
         if self.gated:
             if return_gates:
                 fused, gate_dict = self.gated_fusion(feat_dict, return_gates=True)
                 logits = self.classifier(fused)
+                if return_features:
+                    return logits, gate_dict, raw_feat_dict
                 return logits, gate_dict
+
             fused = self.gated_fusion(feat_dict)
         else:
-            fused = torch.cat(feats, dim=1)
+            fused = torch.cat(dropped_feats, dim=1)
 
         logits = self.classifier(fused)
+
+        if return_features:
+            return logits, raw_feat_dict
+
         return logits
     
     def apply_modality_dropout(self, feats):

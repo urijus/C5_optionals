@@ -18,20 +18,20 @@ class DataConfig:
 @dataclass
 class TrainConfig:
     batch_size: int = 32
-    epochs: int = 30
+    epochs: int = 20
     lr: float = 1e-4
-    weight_decay: float = 1e-4
-    use_weighted_loss: bool = True
-    use_weighted_sampler: bool = True 
-    label_smoothing: float = 0.0
-    alpha: float = 0.5
-    beta: float = 0.2
-    early_stopping_patience: int = 6
-    modality_dropout_prob: float = 0.1
+    weight_decay: float = 0
+    use_weighted_loss: bool = False 
+    use_weighted_sampler: bool = False 
+    label_smoothing: float = 0
+    alpha: float = 0 #0.5
+    beta: float = 0 #0.1
+    early_stopping_patience: int = 20
+    modality_dropout_prob: float = 6
 
     # Visual encoder
     visual_encoder_lr: float = 1e-5
-    train_last_n_blocks_visual: int = 0
+    train_last_n_blocks_visual: int = -1
     visual_encoder_proj_lr: float = 1e-4
 
     # Audio encoder
@@ -40,7 +40,7 @@ class TrainConfig:
     # Text encoder
     text_encoder_lr: float = 5e-6
     text_encoder_proj_lr: float = 1e-4
-    train_last_n_blocks_text: int = 0
+    train_last_n_blocks_text: int = -1
 
     # Gating
     gate_lr: float = 1e-4
@@ -48,28 +48,17 @@ class TrainConfig:
     # Final classifier
     classifier_lr: float = 1e-4
 
-    # Contrastive loss
-    use_contrastive: bool = True
-    contrastive_weight: float = 0.1
-    contrastive_temperature: float = 0.1
-
-
 @dataclass
 class ModelConfig:
     modalities: List[str] = field(default_factory=lambda: ["image", "text", "audio"])
     embedding_dim: int = 256
     num_classes: int = 7
-    classifier_dropout: float = 0.4
+    dropout: float = 0.4
 
-    gated: bool = True
+    gated: bool = False
     visual_encoder: str = "inception"
-    visual_dropout: float = 0.3
-
     text_encoder: str = "distilbert-base-uncased"
-    text_dropout: float = 0.3
-    
     audio_encoder: str = "cnn"
-    audio_dropout: float = 0.3
 
 @dataclass
 class Config:

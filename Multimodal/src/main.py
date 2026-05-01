@@ -1,13 +1,13 @@
 import argparse
 import torch
 from pathlib import Path
-from src.config import Config
+from src.best import Config #config
 from src.data.loaders import get_dataloaders
 from src.models.fusion_model import MultiModalModel
 from src.train.engine import fit, load_checkpoint
 from src.train.losses import build_loss
 from src.train.test_utils import evaluate_test, predict_and_export_csv
-from utils import inspect_average_gates
+from src.utils import inspect_average_gates
 
 
 def get_user_args():
@@ -24,9 +24,11 @@ def get_user_args():
     return parser.parse_args()
 
 
-def main():
+def main(config=None):
     args = get_user_args()
-    config = Config()
+
+    if config is None:
+        config = Config()
 
     if args.seed is not None:
         config.seed = args.seed
@@ -40,18 +42,18 @@ def main():
     model = MultiModalModel(config, device).to(device)
 
     # Train
-    history, best_state = fit(
-        config,
-        model,
-        train_loader,
-        valid_loader,
-        class_weights,
-        ethnic_weights,
-        device,
-    )
+    # history, best_state = fit(
+    #     config,
+    #     model,
+    #     train_loader,
+    #     valid_loader,
+    #     class_weights,
+    #     ethnic_weights,
+    #     device,
+    # )
 
     # Load best checkpoint
-    checkpoint_path = Path(config.output_dir) / "best_model.pt"
+    checkpoint_path = Path(config.output_dir) / "full.pt"
     load_checkpoint(model, checkpoint_path, device=device)
 
     if config.model.gated:
@@ -62,10 +64,10 @@ def main():
             print(f"{modality}: {value:.4f}")
 
     # Evaluate on test
-    loss_fn = build_loss(label_smoothing=0.0)
+    loss_fn = build_loss()
 
-    test_loss, test_acc = evaluate_test(model, test_loader, loss_fn, device)
-    print(f"Test loss: {test_loss:.4f} | Test acc: {test_acc:.4f}")
+    test_loss, test_acc, test_f1 = evaluate_test(model, test_loader, loss_fn, device)
+    print(f"Test loss: {test_loss:.4f} | Test acc: {test_acc:.4f} | Test macro-F1: {test_f1:.4f}")
 
     # Export csv for bias evaluation script
     predict_and_export_csv(

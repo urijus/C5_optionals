@@ -5,3 +5,7 @@
 *.pt
 *.pyc
 *.DS_Store
+*.json
+*.png
+*.err
+*.out

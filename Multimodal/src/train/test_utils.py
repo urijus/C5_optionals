@@ -1,5 +1,6 @@
 import pandas as pd
 import torch
+from sklearn.metrics import f1_score
 
 from src.train.engine import move_batch_to_device
 
@@ -11,7 +12,6 @@ def predict_and_export_csv(model, data_loader, device, save_path):
     rows = []
 
     for batch in data_loader:
-        # move tensor fields
         moved_batch = move_batch_to_device(batch, device)
         logits = model(moved_batch)
         preds = torch.argmax(logits, dim=1).cpu().tolist()
@@ -39,6 +39,9 @@ def evaluate_test(model, data_loader, loss_fn, device):
     total_correct = 0
     total_samples = 0
 
+    all_preds = []
+    all_labels = []
+
     for batch in data_loader:
         moved_batch = move_batch_to_device(batch, device)
         labels = moved_batch["age"]
@@ -51,7 +54,11 @@ def evaluate_test(model, data_loader, loss_fn, device):
         total_correct += (preds == labels).sum().item()
         total_samples += labels.size(0)
 
+        all_preds.extend(preds.cpu().tolist())
+        all_labels.extend(labels.cpu().tolist())
+
     avg_loss = total_loss / total_samples
     avg_acc = total_correct / total_samples
+    macro_f1 = f1_score(all_labels, all_preds, average="macro")
 
-    return avg_loss, avg_acc
+    return avg_loss, avg_acc, macro_f1

@@ -1,7 +1,8 @@
 import torch
 from pathlib import Path
-from src.train.losses import build_loss
+from src.train.losses import build_loss, multimodal_contrastive_loss
 from src.data.sampler import compute_sample_weights
+from sklearn.metrics import f1_score
 
 
 
@@ -110,20 +111,25 @@ def load_checkpoint(model, checkpoint_path, device, optimizer=None):
 
 
 def train_one_epoch(
-        model, 
-        train_loader, 
-        optimizer, 
+        model,
+        train_loader,
+        optimizer,
         class_weights,
         ethnic_weights,
         alpha,
         beta,
-        loss_fn, 
-        device):
-    
+        loss_fn,
+        device,
+        lambda_contrastive=0.1,
+        temperature=0.1):
+
     model.train()
 
     running_loss = 0.0
     running_acc = 0.0
+
+    all_preds = []
+    all_labels = []
 
     class_weights = class_weights.to(device) if class_weights is not None else None
     ethnic_weights = ethnic_weights.to(device) if ethnic_weights is not None else None
@@ -135,9 +141,8 @@ def train_one_epoch(
 
         optimizer.zero_grad()
 
-        logits = model(batch)
+        logits, feat_dict = model(batch, return_features=True)
         loss_per_sample = loss_fn(logits, labels)
-
 
         if class_weights is not None and ethnic_weights is not None:
             sample_weights = compute_sample_weights(
@@ -148,20 +153,33 @@ def train_one_epoch(
                 alpha=alpha,
                 beta=beta,
             )
-            loss = (loss_per_sample * sample_weights).mean()
+            cls_loss = (loss_per_sample * sample_weights).mean()
         else:
-            loss = loss_per_sample.mean()
+            cls_loss = loss_per_sample.mean()
+
+        contrast_loss = multimodal_contrastive_loss(
+            feat_dict,
+            temperature=temperature
+        )
+
+        loss = cls_loss + lambda_contrastive * contrast_loss
 
         loss.backward()
         optimizer.step()
 
+        preds = torch.argmax(logits, dim=1)
+
         running_loss += loss.item()
         running_acc += compute_accuracy(logits, labels)
 
+        all_preds.extend(preds.detach().cpu().tolist())
+        all_labels.extend(labels.detach().cpu().tolist())
+
     epoch_loss = running_loss / len(train_loader)
     epoch_acc = running_acc / len(train_loader)
+    epoch_f1 = f1_score(all_labels, all_preds, average="macro")
 
-    return epoch_loss, epoch_acc
+    return epoch_loss, epoch_acc, epoch_f1
 
 
 @torch.no_grad()
@@ -170,6 +188,9 @@ def evaluate(model, data_loader, loss_fn, device):
 
     running_loss = 0.0
     running_acc = 0.0
+
+    all_preds = []
+    all_labels = []
 
     for batch in data_loader:
         batch = move_batch_to_device(batch, device)
@@ -181,10 +202,16 @@ def evaluate(model, data_loader, loss_fn, device):
         running_loss += loss.item()
         running_acc += compute_accuracy(logits, labels)
 
+        preds = torch.argmax(logits, dim=1)
+
+        all_preds.extend(preds.detach().cpu().tolist())
+        all_labels.extend(labels.detach().cpu().tolist())
+
     epoch_loss = running_loss / len(data_loader)
     epoch_acc = running_acc / len(data_loader)
+    epoch_f1 = f1_score(all_labels, all_preds, average="macro")
 
-    return epoch_loss, epoch_acc
+    return epoch_loss, epoch_acc, epoch_f1
 
 
 def fit(config, model, train_loader, val_loader, class_weights, ethnic_weights, device):
@@ -204,13 +231,15 @@ def fit(config, model, train_loader, val_loader, class_weights, ethnic_weights, 
     history = {
         "train_loss": [],
         "train_acc": [],
+        "train_f1": [],
         "val_loss": [],
         "val_acc": [],
+        "val_f1": []
     }
 
     config.output_dir.mkdir(exist_ok=True, parents=True)
     for epoch in range(config.train.epochs):
-        train_loss, train_acc = train_one_epoch(
+        train_loss, train_acc, train_f1 = train_one_epoch(
             model=model,
             train_loader=train_loader,
             optimizer=optimizer,
@@ -219,10 +248,12 @@ def fit(config, model, train_loader, val_loader, class_weights, ethnic_weights, 
             ethnic_weights=ethnic_weights,
             alpha=config.train.alpha,
             beta=config.train.beta,
-            device=device
+            device=device,
+            lambda_contrastive=config.train.contrastive_weight if config.train.use_contrastive else 0.0,
+            temperature=config.train.contrastive_temperature,
         )
 
-        val_loss, val_acc = evaluate(
+        val_loss, val_acc, val_f1 = evaluate(
             model=model,
             data_loader=val_loader,
             loss_fn=loss_fn,
@@ -231,13 +262,15 @@ def fit(config, model, train_loader, val_loader, class_weights, ethnic_weights, 
 
         history["train_loss"].append(train_loss)
         history["train_acc"].append(train_acc)
+        history["train_f1"].append(train_f1)
         history["val_loss"].append(val_loss)
         history["val_acc"].append(val_acc)
+        history["val_f1"].append(val_f1)
 
         print(
             f"Epoch {epoch+1:03d}/{config.train.epochs:03d} | "
-            f"train_loss={train_loss:.4f} | train_acc={train_acc:.4f} | "
-            f"val_loss={val_loss:.4f} | val_acc={val_acc:.4f}"
+            f"train_loss={train_loss:.4f} | train_acc={train_acc:.4f} | train_f1={train_f1:.4f} |"
+            f"val_loss={val_loss:.4f} | val_acc={val_acc:.4f} | val_f1={val_f1:.4f}"
         )
 
         if val_acc > best_val_acc:
@@ -247,6 +280,7 @@ def fit(config, model, train_loader, val_loader, class_weights, ethnic_weights, 
                 "optimizer_state_dict": optimizer.state_dict(),
                 "epoch": epoch,
                 "val_acc": val_acc,
+                "val_f1": val_f1
             }
 
             save_checkpoint(best_state, config.output_dir / "best_model.pt")

@@ -37,13 +37,17 @@ def set_trainable_backbone(backbone, train_last_n_blocks):
         
 
 class TextEncoder(nn.Module):
-    def __init__(self, embedding_dim: int, model_name: str = "distilbert-base-uncased", train_last_n_blocks=-1):
+    def __init__(self, 
+                 text_dropout: float,
+                 embedding_dim: int, 
+                 model_name: str = "distilbert-base-uncased", 
+                 train_last_n_blocks=-1):
         super().__init__()
         self.backbone = AutoModel.from_pretrained(model_name)
         set_trainable_backbone(self.backbone, train_last_n_blocks=train_last_n_blocks)
         hidden_size = self.backbone.config.hidden_size
         self.proj = nn.Linear(hidden_size, embedding_dim)
-        self.dropout = nn.Dropout(0.2)
+        self.dropout = nn.Dropout(text_dropout)
 
     def forward(self, input_ids, attention_mask):
         outputs = self.backbone(input_ids=input_ids, attention_mask=attention_mask)
